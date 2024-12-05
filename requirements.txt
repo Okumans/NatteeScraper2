@@ -4,3 +4,8 @@ nodeenv==1.9.1
 python-Levenshtein==0.26.0
 RapidFuzz==3.10.1
 typing_extensions==4.12.2
+python-dotenv==1.0.1
+tqdm==4.67.1
+pydantic==2.10.3
+beautifulsoup4==4.12.3
+requests==2.32.3
