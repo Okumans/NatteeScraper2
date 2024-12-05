@@ -1,0 +1,6 @@
+fuzzywuzzy==0.18.0
+Levenshtein==0.26.0
+nodeenv==1.9.1
+python-Levenshtein==0.26.0
+RapidFuzz==3.10.1
+typing_extensions==4.12.2
