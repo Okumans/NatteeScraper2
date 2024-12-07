@@ -1,3 +1,3 @@
 from .scraper import NatteeScraper, LoginPostData
 
-__all__ = ["NatteeScraper"]
+__all__ = ["NatteeScraper", "LoginPostData"]

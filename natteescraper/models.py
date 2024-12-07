@@ -45,10 +45,10 @@ class TestCase(BaseModel):
 class HallOfFame(BaseModel):
     """Represents the hall of fame data for a specific language."""
 
-    best_runtime: str
-    best_memory: str
-    shortest_code: str
-    first_solver: str
+    best_runtime: Code
+    best_memory: Code
+    shortest_code: Code
+    first_solver: Code
 
 
 class Task(BaseModel):
