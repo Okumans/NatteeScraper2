@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel, HttpUrl
 from typing import Literal, List, Dict, Optional
 from bs4 import BeautifulSoup, Tag
@@ -42,6 +43,17 @@ class TestCase(BaseModel):
     output: str
 
 
+class Submissions(BaseModel):
+    user: str
+    task_id: str
+    score: float
+    code: Code
+    language: Language
+    runtime: float
+    memory: int
+    graded: datetime
+
+
 class HallOfFame(BaseModel):
     """Represents the hall of fame data for a specific language."""
 
@@ -58,7 +70,7 @@ class Task(BaseModel):
     task_nickname: str
     task_id: str
     pdf_url: HttpUrl
-    hall_of_fame: Dict[str, HallOfFame]
+    hall_of_fame: Dict[Language, HallOfFame]
     test_cases: List[TestCase]
 
 
@@ -97,40 +109,9 @@ class PartialTask(BaseModel):
             for input_, output in zip(inputs, outputs)
         ]
 
-    def __scrape_hall_of_fame(self, session: Session) -> Dict[str, HallOfFame]:
+    def __scrape_hall_of_fame(self, session: Session) -> Dict[Language, HallOfFame]:
         """Scrapes hall of fame data for the task."""
 
         from .scraper import NatteeScraper
 
-        response = session.get(f"{DEFAULT_HALL_OF_FAME_URL}/{self.task_id}")
-        rows = (
-            BeautifulSoup(response.text, "html.parser")
-            .select("table.table-hover")[-1]
-            .select("tbody tr")[1:]
-        )
-
-        fame: Dict[str, HallOfFame] = {}
-        for row in rows:
-            language = row.select_one("td")
-
-            if not isinstance(language, Tag):
-                raise ScrapingError("nono")
-
-            language = language.get_text(strip=True)
-            links = row.select("td a[href^='/submissions']")
-
-            fame[language] = HallOfFame(
-                best_runtime=NatteeScraper._scrape_submission(
-                    session, links[0].get_text(strip=True).strip("()").removeprefix("#")
-                ),
-                best_memory=NatteeScraper._scrape_submission(
-                    session, links[1].get_text(strip=True).strip("()").removeprefix("#")
-                ),
-                shortest_code=NatteeScraper._scrape_submission(
-                    session, links[2].get_text(strip=True).strip("()").removeprefix("#")
-                ),
-                first_solver=NatteeScraper._scrape_submission(
-                    session, links[3].get_text(strip=True).strip("()").removeprefix("#")
-                ),
-            )
-        return fame
+        return NatteeScraper._scrape_hall_of_fame(session, self.task_id)

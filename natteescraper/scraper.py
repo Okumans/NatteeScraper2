@@ -1,11 +1,16 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, get_args
 import re
 from pydantic import HttpUrl, TypeAdapter
 from bs4.element import Tag
 from bs4 import BeautifulSoup
 from requests import Response, Session
-from .models import LoginPostData, PartialTask
-from .constants import DEFAULT_ROOT_URL, DEFAULT_LOGIN_URL, DEFAULT_SUBMISSION_URL
+from .models import Language, LoginPostData, PartialTask, HallOfFame
+from .constants import (
+    DEFAULT_ROOT_URL,
+    DEFAULT_LOGIN_URL,
+    DEFAULT_SUBMISSION_URL,
+    DEFAULT_HALL_OF_FAME_URL,
+)
 from .errors import ScrapingError, LoginError
 
 
@@ -70,6 +75,9 @@ class NatteeScraper:
         """
         return self._scrape_submission(self.get_session(), submission_id)
 
+    def get_hall_of_fame(self, submission_id: str) -> Dict[Language, HallOfFame]:
+        return self._scrape_hall_of_fame(self.get_session(), submission_id)
+
     @staticmethod
     def _scrape_submission(session: Session, submission_id: str) -> str:
         """
@@ -118,6 +126,60 @@ class NatteeScraper:
                 print(f"Failed to process a task row: {e}")
 
         return tasks
+
+    @staticmethod
+    def _scrape_hall_of_fame(
+        session: Session, task_id: str
+    ) -> Dict[Language, HallOfFame]:
+        """
+        Scrape Hall of Fame data for a specific task.
+
+        :param session: A requests.Session object used for making HTTP requests.
+        :param task_id: The unique identifier of the task.
+        :raises ScrapingError: If the webpage structure is unexpected or the language type is not registered.
+        :return: A dictionary mapping programming languages to HallOfFame objects.
+        """
+
+        response = session.get(f"{DEFAULT_HALL_OF_FAME_URL}/{task_id}")
+        rows = (
+            BeautifulSoup(response.text, "html.parser")
+            .select("table.table-hover")[-1]
+            .select("tbody tr")[1:]
+        )
+
+        fame: Dict[Language, HallOfFame] = {}
+        for row in rows:
+            language = row.select_one("td")
+
+            if not isinstance(language, Tag):
+                raise ScrapingError(
+                    "Expected a valid HTML tag for the language field but found an invalid structure."
+                )
+
+            language = language.get_text(strip=True)
+            links = row.select("td a[href^='/submissions']")
+
+            if language not in get_args(Language):
+                raise ScrapingError(
+                    f"The language '{language}' is not registered in the Language type. "
+                    "Please update the Language enumeration to include this entry."
+                )
+
+            fame[language] = HallOfFame(
+                best_runtime=NatteeScraper._scrape_submission(
+                    session, links[0].get_text(strip=True).strip("()").removeprefix("#")
+                ),
+                best_memory=NatteeScraper._scrape_submission(
+                    session, links[1].get_text(strip=True).strip("()").removeprefix("#")
+                ),
+                shortest_code=NatteeScraper._scrape_submission(
+                    session, links[2].get_text(strip=True).strip("()").removeprefix("#")
+                ),
+                first_solver=NatteeScraper._scrape_submission(
+                    session, links[3].get_text(strip=True).strip("()").removeprefix("#")
+                ),
+            )
+        return fame
 
     def __process_task_row(self, task_row: Tag, tasks_id: List[str]) -> PartialTask:
         """
