@@ -4,12 +4,13 @@ from pydantic import HttpUrl, TypeAdapter
 from bs4.element import Tag
 from bs4 import BeautifulSoup
 from requests import Response, Session
-from .models import Language, LoginPostData, PartialTask, HallOfFame
+from .models import Language, LoginPostData, PartialTask, HallOfFame, TestCase
 from .constants import (
     DEFAULT_ROOT_URL,
     DEFAULT_LOGIN_URL,
     DEFAULT_SUBMISSION_URL,
     DEFAULT_HALL_OF_FAME_URL,
+    DEFAULT_TESTCASE_URL,
 )
 from .errors import ScrapingError, LoginError
 
@@ -71,32 +72,27 @@ class NatteeScraper:
         Retrieve the content of a submission by its ID.
 
         :param submission_id: The ID of the submission.
-        :return: The content of the submission.
+        :return: The content of the submission as a string.
         """
         return self._scrape_submission(self.get_session(), submission_id)
 
-    def get_hall_of_fame(self, submission_id: str) -> Dict[Language, HallOfFame]:
-        return self._scrape_hall_of_fame(self.get_session(), submission_id)
-
-    @staticmethod
-    def _scrape_submission(session: Session, submission_id: str) -> str:
+    def get_hall_of_fame(self, task_id: str) -> Dict[Language, HallOfFame]:
         """
-        Scrape the content of a submission.
+        Retrieve the Hall of Fame data for a specific task.
 
-        :param session: Active session object for authenticated requests.
-        :param submission_id: The ID of the submission.
-        :raises ScrapingError: If no content is found in the <textarea> element.
-        :return: The text content of the submission.
+        :param task_id: The unique identifier of the task.
+        :return: A dictionary mapping programming languages to HallOfFame objects.
         """
-        response = session.get(f"{DEFAULT_SUBMISSION_URL}/{submission_id}")
-        matches = re.findall(r"<textarea.*>(.*)</textarea>", response.text, re.DOTALL)
+        return self._scrape_hall_of_fame(self.get_session(), task_id)
 
-        if len(matches) <= 0:
-            raise ScrapingError(
-                f"No content found in <textarea> for submission ID: {submission_id}"
-            )
+    def get_test_cases(self, task_id: str) -> List[TestCase]:
+        """
+        Retrieve test cases for a specific task.
 
-        return matches[0]
+        :param task_id: The unique identifier of the task.
+        :return: A list of TestCase objects containing input and output pairs.
+        """
+        return self._scrape_test_cases(self.get_session(), task_id)
 
     def __scrape_tasks(self, response: Response) -> List[PartialTask]:
         """
@@ -126,6 +122,47 @@ class NatteeScraper:
                 print(f"Failed to process a task row: {e}")
 
         return tasks
+
+    @staticmethod
+    def _scrape_submission(session: Session, submission_id: str) -> str:
+        """
+        Scrape the content of a submission.
+
+        :param session: Active session object for authenticated requests.
+        :param submission_id: The ID of the submission.
+        :raises ScrapingError: If no content is found in the <textarea> element.
+        :return: The text content of the submission.
+        """
+        response = session.get(f"{DEFAULT_SUBMISSION_URL}/{submission_id}")
+        matches = re.findall(r"<textarea.*>(.*)</textarea>", response.text, re.DOTALL)
+
+        if len(matches) <= 0:
+            raise ScrapingError(
+                f"No content found in <textarea> for submission ID: {submission_id}"
+            )
+
+        return matches[0]
+
+    @staticmethod
+    def _scrape_test_cases(session: Session, task_id: str) -> List[TestCase]:
+        """
+        Scrape test cases for a specific task.
+
+        :param session: A requests.Session object used to make HTTP requests.
+        :param task_id: The unique identifier of the task.
+        :raises ScrapingError: If the test case structure on the webpage is invalid or incomplete.
+        :return: A list of TestCase objects containing input and output pairs.
+        """
+
+        response = session.get(f"{DEFAULT_TESTCASE_URL}/{task_id}")
+        soup = BeautifulSoup(response.text, "html.parser")
+        textareas = soup.find_all("textarea")
+
+        inputs, outputs = textareas[::2], textareas[1::2]
+        return [
+            TestCase(input=input_.text, output=output.text)
+            for input_, output in zip(inputs, outputs)
+        ]
 
     @staticmethod
     def _scrape_hall_of_fame(

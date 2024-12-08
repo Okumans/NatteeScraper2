@@ -99,15 +99,10 @@ class PartialTask(BaseModel):
 
     def __scrape_test_cases(self, session: Session) -> List[TestCase]:
         """Scrapes test cases for the task."""
-        response = session.get(f"{DEFAULT_TESTCASE_URL}/{self.task_id}")
-        soup = BeautifulSoup(response.text, "html.parser")
-        textareas = soup.find_all("textarea")
 
-        inputs, outputs = textareas[::2], textareas[1::2]
-        return [
-            TestCase(input=input_.text, output=output.text)
-            for input_, output in zip(inputs, outputs)
-        ]
+        from .scraper import NatteeScraper
+
+        return NatteeScraper._scrape_test_cases(session, self.task_id)
 
     def __scrape_hall_of_fame(self, session: Session) -> Dict[Language, HallOfFame]:
         """Scrapes hall of fame data for the task."""
