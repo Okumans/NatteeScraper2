@@ -1,11 +1,7 @@
 from datetime import datetime
 from pydantic import BaseModel, HttpUrl
 from typing import Literal, List, Dict, Optional
-from bs4 import BeautifulSoup, Tag
 from requests import Session
-
-from .errors import ScrapingError
-from .constants import DEFAULT_HALL_OF_FAME_URL, DEFAULT_TESTCASE_URL
 
 Code = str
 
@@ -43,8 +39,21 @@ class TestCase(BaseModel):
     output: str
 
 
+class User(BaseModel):
+    """Represents a user with basic details like name and student ID."""
+
+    user_name: str
+    student_id: str
+    user_id: str
+
+
 class Submissions(BaseModel):
-    user: str
+    """
+    Represents a submission made by a user for a specific task.
+    * The user can be optional, as the user may be redacted in certain cases.
+    """
+
+    user: Optional[User]
     task_id: str
     score: float
     code: Code

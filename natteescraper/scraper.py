@@ -4,7 +4,18 @@ from pydantic import HttpUrl, TypeAdapter
 from bs4.element import Tag
 from bs4 import BeautifulSoup
 from requests import Response, Session
-from .models import Language, LoginPostData, PartialTask, HallOfFame, TestCase
+from datetime import datetime
+
+from .models import (
+    Language,
+    LoginPostData,
+    PartialTask,
+    HallOfFame,
+    Submissions,
+    TestCase,
+    User,
+    Code,
+)
 from .constants import (
     DEFAULT_ROOT_URL,
     DEFAULT_LOGIN_URL,
@@ -67,7 +78,7 @@ class NatteeScraper:
 
         return new_session
 
-    def get_submission(self, submission_id: str) -> str:
+    def get_submission(self, submission_id: str) -> Submissions:
         """
         Retrieve the content of a submission by its ID.
 
@@ -102,6 +113,7 @@ class NatteeScraper:
         :raises ScrapingError: If the main tasks table or body is not found.
         :return: List of PartialTask objects.
         """
+
         main_table = BeautifulSoup(response.text, "html.parser").find(
             "table", {"id": "main_table"}
         )
@@ -124,24 +136,108 @@ class NatteeScraper:
         return tasks
 
     @staticmethod
-    def _scrape_submission(session: Session, submission_id: str) -> str:
+    def _scrape_submission(session: Session, submission_id: str) -> Submissions:
         """
         Scrape the content of a submission.
 
         :param session: Active session object for authenticated requests.
         :param submission_id: The ID of the submission.
-        :raises ScrapingError: If no content is found in the <textarea> element.
-        :return: The text content of the submission.
+        :raises ScrapingError: If required elements are missing or malformed.
+        :return: Submissions object containing parsed submission data.
         """
-        response = session.get(f"{DEFAULT_SUBMISSION_URL}/{submission_id}")
-        matches = re.findall(r"<textarea.*>(.*)</textarea>", response.text, re.DOTALL)
 
-        if len(matches) <= 0:
+        response = session.get(f"{DEFAULT_SUBMISSION_URL}/{submission_id}")
+
+        # Extract code content (This needed to be done because C++ code send via html break the html encoding with angle brackets)
+        matches = re.findall(
+            r"<textarea[^>]*>(.*)</textarea>", response.text, re.DOTALL
+        )
+        if not matches:
             raise ScrapingError(
                 f"No content found in <textarea> for submission ID: {submission_id}"
             )
+        code = NatteeScraper._clean_scraped_code(matches[0])
 
-        return matches[0]
+        # Remove textarea for cleaner parsing
+        cleaned_text = re.sub(
+            r"<textarea[^>]*>.*</textarea>", "", response.text, flags=re.DOTALL
+        )
+        soup = BeautifulSoup(cleaned_text, "html.parser")
+
+        def find_element(pattern: str, next_tag: bool = True) -> Tag:
+            """Helper to find and validate elements"""
+            elem = soup.find("td", text=re.compile(rf"\b{pattern}\b"))
+            if not isinstance(elem, Tag):
+                raise ScrapingError(f"Failed to find {pattern} element")
+            if next_tag:
+                elem = elem.find_next("td")
+                if not isinstance(elem, Tag):
+                    raise ScrapingError(f"Failed to find next tag for {pattern}")
+            return elem
+
+        # Parse user info
+        user: Optional[User] = None
+        user_td = find_element("User")
+        user_name = "".join(user_td.find_all(text=True, recursive=False)).strip()
+
+        if user_name != "-- REDACTED --":
+            user_href = user_td.find("a")
+
+            if not isinstance(user_href, Tag):
+                raise ScrapingError("Failed to find user link")
+
+            user_id = user_href.get("href")
+            if not isinstance(user_id, str):
+                raise ScrapingError("Invalid user ID format")
+            user_id = user_id.strip().split("/")[-2]
+
+            user = User(user_name=user_name, user_id=user_id, student_id=user_href.text)
+
+        # Parse task ID
+        task_elem = soup.find("h2")
+        if not isinstance(task_elem, Tag):
+            raise ScrapingError("Failed to find task ID")
+        task_id = task_elem.text.split(":")[-1].strip()
+
+        # Parse score, language, runtime, memory
+        score = float(find_element("Points").text.split("/")[0].strip())
+
+        language = find_element("Language").text.strip()
+        if language not in get_args(Language):
+            raise ScrapingError(
+                f"Language '{language}' not registered. Update Language enumeration."
+            )
+
+        runtime_span = find_element("Runtime").find("span")
+        if not isinstance(runtime_span, Tag):
+            raise ScrapingError("Failed to find runtime span")
+        runtime = float(runtime_span.text.strip())
+
+        memory_span = find_element("Memory").find("span")
+        if not isinstance(memory_span, Tag):
+            raise ScrapingError("Failed to find memory span")
+        memory = int(memory_span.text.strip())
+
+        # Parse submission date
+        graded_text = find_element("Graded").text.strip()
+        try:
+            graded = datetime.strptime(
+                graded_text.split("(")[-1].strip("() ").removeprefix("at").strip(),
+                "%B %d, %Y %H:%M",
+            )
+        except ValueError:
+            raise ScrapingError(f"Failed to parse submission date: {graded_text}")
+
+        return Submissions(
+            user=user,
+            task_id=task_id,
+            score=score,
+            code=code,
+            language=language,
+            runtime=runtime,
+            memory=memory,
+            graded=graded,
+        )
 
     @staticmethod
     def _scrape_test_cases(session: Session, task_id: str) -> List[TestCase]:
@@ -205,16 +301,16 @@ class NatteeScraper:
             fame[language] = HallOfFame(
                 best_runtime=NatteeScraper._scrape_submission(
                     session, links[0].get_text(strip=True).strip("()").removeprefix("#")
-                ),
+                ).code,
                 best_memory=NatteeScraper._scrape_submission(
                     session, links[1].get_text(strip=True).strip("()").removeprefix("#")
-                ),
+                ).code,
                 shortest_code=NatteeScraper._scrape_submission(
                     session, links[2].get_text(strip=True).strip("()").removeprefix("#")
-                ),
+                ).code,
                 first_solver=NatteeScraper._scrape_submission(
                     session, links[3].get_text(strip=True).strip("()").removeprefix("#")
-                ),
+                ).code,
             )
         return fame
 
@@ -347,6 +443,16 @@ class NatteeScraper:
             nickname_tag.get_text(strip=True),
             f"{DEFAULT_ROOT_URL}/{pdf_url.lstrip('/')}",
         )
+
+    @staticmethod
+    def _clean_scraped_code(code: Code) -> Code:
+        """
+        Clean the scraped code by removing unwanted characters.
+
+        :param code: Raw scraped code to be cleaned.
+        :return: Cleaned code.
+        """
+        return code.strip().removesuffix("&#x000A;").replace("\r", "").strip()
 
     def __del__(self):
         """
